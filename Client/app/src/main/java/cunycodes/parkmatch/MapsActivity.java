@@ -4,9 +4,9 @@ import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.DialogFragment;
 import android.app.TimePickerDialog;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.gesture.Prediction;
 import android.location.Criteria;
 import android.location.Location;
 import android.location.LocationManager;
@@ -14,16 +14,12 @@ import android.os.Bundle;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.text.format.DateFormat;
-import android.util.Log;
-import android.view.Menu;
-import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.TimePicker;
-import android.widget.Toast;
 
-import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.awareness.snapshot.PlacesResult;
 import com.google.android.gms.location.places.Place;
 import com.google.android.gms.location.places.ui.PlacePicker;
 import com.google.android.gms.maps.CameraUpdateFactory;
@@ -32,21 +28,79 @@ import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.MarkerOptions;
+import com.google.android.gms.maps.model.PolylineOptions;
+import com.google.api.client.http.HttpRequestInitializer;
+import com.google.api.client.json.JsonFactory;
+import com.google.api.client.json.JsonObjectParser;
+import com.google.api.client.json.jackson2.JacksonFactory;
+import com.google.api.client.util.Key;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 
+//import org.apache.http.HttpRequest;
+//import org.apache.http.HttpRequestFactory;
+//import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.DefaultHttpClient;
+import com.google.api.client.http.GenericUrl;
+import com.google.api.client.http.HttpRequestFactory;
+import com.google.api.client.http.HttpRequest;
+import com.google.api.client.http.HttpResponse;
+import com.google.api.client.http.HttpTransport;
+import com.google.api.client.extensions.android.http.AndroidHttp;
+import com.google.maps.android.PolyUtil;
+
 import java.io.File;
+import java.io.IOException;
+import java.net.URL;
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.List;
+
+import static cunycodes.parkmatch.R.id.map;
 
 public class MapsActivity extends AppCompatActivity implements OnMapReadyCallback {
 
+    private static final com.google.api.client.http.HttpTransport HTTP_TRANSPORT = null;
     public static GoogleMap mMap;
     private static DatabaseReference mDatabase;
     public static int hourLeaving, minLeaving;
     public static double newLat, newLong;
+    final JsonFactory JSON_FACTORY = new JacksonFactory();
+    private List<LatLng> latLngs = new ArrayList<LatLng>();
 
     //a variable in order to receive results for pacePicker
+    public static class PlacesResult {
 
+        @Key("predictions")
+        public List<Prediction> predictions;
+
+    }
+
+    public static class Prediction {
+        @Key("description")
+        public String description;
+
+        @Key("id")
+        public String id;
+
+    }
+
+    public static class DirectionsResult {
+        @Key("routes")
+        public List<Route> routes;
+    }
+
+    public static class Route {
+        @Key("overview_polyline")
+        public OverviewPolyLine overviewPolyLine;
+    }
+
+    public static class OverviewPolyLine {
+        @Key("points")
+        public String points;
+    }
 
     private final int REQUEST_CODE_PLACEPICKER = 1;
 
@@ -113,12 +167,12 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_maps);
-
+   // ShowDirection();
         mDatabase = FirebaseDatabase.getInstance().getReference();
 
         // Obtain the SupportMapFragment and get notified when the map is ready to be used.
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
-                .findFragmentById(R.id.map);
+                .findFragmentById(map);
         mapFragment.getMapAsync(this);
 
         //////////////////////////////////////////////////////////////////////////////////////////
@@ -220,7 +274,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
 
     double Nextblock = 0.0012;
 
-    public void gotoParking(Intent data) {
+    public void oldgotoParking(Intent data) throws IOException {
 
         Place placeSelected = PlacePicker.getPlace(this, data);
 
@@ -248,13 +302,13 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         displayTimePicker.setVisibility(View.VISIBLE);
 
 
-
-
         ///////////////////////////////////////////////
 
 
         TextView enterCurrentLocation = (TextView) findViewById(R.id.SearchParking);
         enterCurrentLocation.setText("Found one near " + address);
+
+
         latitude = latitude + Nextblock;
 
         Nextblock = Nextblock + 0.0012;
@@ -269,7 +323,60 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
 
         // Zoom in the Google Map
         mMap.animateCamera(CameraUpdateFactory.zoomTo(17));
-        //mMap.addMarker(new MarkerOptions().position(new LatLng(latitude, longitude)).title("Open Parking Spot Here"));
+        //ShowDirection();
+       /* //mMap.addMarker(new MarkerOptions().position(new LatLng(latitude, longitude)).title("Open Parking Spot Here"));
+        HttpRequestFactory requestFactory = HTTP_TRANSPORT.createRequestFactory();
+        GenericUrl url = new GenericUrl("https://maps.googleapis.com/maps/api/directions/json?origin=Toronto&destination=Montreal&key=AIzaSyDX66N9_A0JYKXNEwcr0UnWVrrBymFegMI");
+        // String url = "https://maps.googleapis.com/maps/api/directions/json?origin=Toronto&destination=Montreal&key=AIzaSyDX66N9_A0JYKXNEwcr0UnWVrrBymFegMI";
+        HttpRequest request = requestFactory.buildGetRequest(url);
+        HttpResponse httpResponse = request.execute();
+        PlacesResult directionsResult = httpResponse.parseAs(PlacesResult.class);
+
+        List<Prediction> predictions = directionsResult.predictions;
+        for (Prediction prediction : predictions) {
+            // resultList.add(prediction.description);
+        }*/
+    }
+
+    protected String ShowDirection() {
+
+
+        try {
+            HttpRequestFactory requestFactory = HTTP_TRANSPORT.createRequestFactory(new HttpRequestInitializer() {
+                @Override
+                public void initialize(HttpRequest request) {
+                    request.setParser(new JsonObjectParser(JSON_FACTORY));
+                }
+            });
+
+            GenericUrl url = new GenericUrl("http://maps.googleapis.com/maps/api/directions/json");
+            url.put("origin", "Chicago,IL");
+            url.put("destination", "Los Angeles,CA");
+            url.put("sensor", false);
+            url.put("key", "AIzaSyDX66N9_A0JYKXNEwcr0UnWVrrBymFegMI");
+
+            HttpRequest request = requestFactory.buildGetRequest(url);
+            HttpResponse httpResponse = request.execute();
+            DirectionsResult directionsResult = httpResponse.parseAs(DirectionsResult.class);
+            String encodedPoints = directionsResult.routes.get(0).overviewPolyLine.points;
+            latLngs = PolyUtil.decode(encodedPoints);
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+        return null;
+    }
+
+    protected void onProgressUpdate(Integer... progress) {
+    }
+
+    protected void onPostExecute(String result) {
+        //clearMarkers();
+       // addMarkersToMap(latLngs);
+        mMap.addPolyline(new PolylineOptions().addAll(latLngs));
+
+        mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(-33.8256, 151.2395), 12));
+        //mMap.addMarker(new MarkerOptions().position(latLngs.indexOf(0));
+
     }
 
 
@@ -355,6 +462,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             AlertDialog.Builder builder = new AlertDialog.Builder(getActivity());
             builder.setMessage("Your information has been recorded").setTitle("Thank you!");
             builder.show();
+
         }
     }
 
@@ -378,13 +486,15 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == REQUEST_CODE_PLACEPICKER && resultCode == RESULT_OK) {
+            //doInBackground();
             if (ButtonSwitcher == 1) {
 
                 displaySelectedPlaceFromPlacePicker(data);
             }
 
             if (ButtonSwitcher == 2) {
-                gotoParking(data);
+              // gotoParking(data);
+                //ShowDirection();
             }
 
         }
